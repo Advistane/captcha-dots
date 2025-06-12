@@ -1,52 +1,472 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8">
-  <title>Joel</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <style type="text/css">
-    html,
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Annoying Captcha - Hard Mode</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
     body {
-      background: pink;
-      margin: 0;
-      padding: 0;
-      font-family: sans-serif;
+      font-family: 'Inter', sans-serif;
+      touch-action: none;
+      /* Prevents scrolling on touch devices when drawing */
     }
 
-    #captcha-container {
-      background: white;
-      width: 390px;
-      height: 300px;
+    canvas {
+      cursor: crosshair;
+      border-radius: 0.5rem;
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+      width: 100% !important;
+      height: auto !important;
+      max-width: 100%;
+      display: block;
     }
 
-    /* Your style here... */
+    .progress-bar {
+      transition: width 0.2s ease-out;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 
-<body>
-  <div id="captcha-container">
-    <!-- Add your CAPTCHA here: -->
-    Hello world!
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
 
-    <!-- We've added a sample button. Feel free to remove it: -->
-    <button id="solve">
-      Solve!
-    </button>
+  <div class="w-full max-w-xl p-4 md:p-8 bg-white rounded-xl shadow-lg">
+    <div class="text-center mb-4">
+      <p class="text-gray-600 mt-1">Draw a single <span class="font-semibold">closed shape</span> to enclose all <span
+          class="text-green-500 font-semibold">green</span> dots, avoiding all <span
+          class="text-red-500 font-semibold">red</span> dots. End your line where you started.</p>
+    </div>
+
+    <!-- Canvas for the captcha -->
+    <canvas id="captchaCanvas" class="bg-gray-50 border-2 border-gray-200 w-full"></canvas>
+
+    <!-- Ink Indicator -->
+    <div class="mt-4">
+      <label for="ink" class="text-sm font-medium text-gray-700">Ink Remaining:</label>
+      <div id="ink-container" class="w-full bg-gray-200 rounded-full h-4 mt-1 overflow-hidden">
+        <div id="inkBar" class="bg-blue-500 h-4 rounded-full progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Controls and Messages -->
+    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex gap-2 mt-2">
+        <button id="verifyBtn"
+          class="px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+          Verify
+        </button>
+        <button id="resetBtn"
+          class="px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition duration-200">
+          New
+        </button>
+      </div>
+    </div>
   </div>
 
-  <script type="text/javascript">
-    (function(window, document){
-      // This is how you tell the parent window that the CAPTCHA was successful.
-      function captchaSuccess() {
-        window.top.postMessage("success", '*');
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // --- DOM Elements ---
+      const canvas = document.getElementById('captchaCanvas');
+      const ctx = canvas.getContext('2d');
+      const inkBar = document.getElementById('inkBar');
+      const verifyBtn = document.getElementById('verifyBtn');
+      const resetBtn = document.getElementById('resetBtn');
+
+      // --- Game State & Configuration ---
+      let isDrawing = false;
+      let userPath = [];
+      let dots = [];
+      let solutionPath = []; // Store the optimal path
+      let inkUsed = 0;
+      let inkTotal = 1500;
+
+      const config = {
+        dotRadius: 8,
+        greenDots: 5,
+        redDots: 30,
+        minDistance: 30,
+        startPointRadius: 6,
+        closingDistance: 20,
+        inkMargin: 1.35
+      };
+
+      // --- NEW: Adjust inkMargin for mobile users ---
+      function isMobile() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      }
+      if (isMobile()) {
+        config.inkMargin = 1.7; // Give more ink on mobile
       }
 
-      // Your CAPTCHA code goes here, we've added a simple example below:
-      document.getElementById('solve')
-           .addEventListener('click', () => captchaSuccess());
+      // --- Geometry & Path Calculation Utilities ---
+      function cross_product(p1, p2, p3) {
+        return (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+      }
 
-    })(window, document);
+      // Helper: Check if a line segment (p1-p2) intersects a circle (center, radius)
+      function lineIntersectsCircle(p1, p2, center, radius) {
+        // Vector from p1 to p2
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        // Vector from p1 to center
+        const fx = p1.x - center.x;
+        const fy = p1.y - center.y;
+        const a = dx * dx + dy * dy;
+        const b = 2 * (fx * dx + fy * dy);
+        const c = (fx * fx + fy * fy) - radius * radius;
+        let discriminant = b * b - 4 * a * c;
+        if (discriminant < 0) return false; // No intersection
+        discriminant = Math.sqrt(discriminant);
+        const t1 = (-b - discriminant) / (2 * a);
+        const t2 = (-b + discriminant) / (2 * a);
+        // Check if intersection is within the segment
+        return (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1);
+      }
+
+      function getConvexHull(points) {
+        if (points.length <= 2) return [...points];
+        points.sort((a, b) => a.x - b.x || a.y - b.y);
+        const lower = [];
+        for (const p of points) {
+          while (lower.length >= 2 && cross_product(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+            lower.pop();
+          }
+          lower.push(p);
+        }
+        const upper = [];
+        for (let i = points.length - 1; i >= 0; i--) {
+          const p = points[i];
+          while (upper.length >= 2 && cross_product(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+            upper.pop();
+          }
+          upper.push(p);
+        }
+        return lower.slice(0, -1).concat(upper.slice(0, -1));
+      }
+
+      function getPathPerimeter(path) {
+        let perimeter = 0;
+        if (path.length < 2) return 0;
+        for (let i = 0; i < path.length; i++) {
+          const p1 = path[i];
+          const p2 = path[(i + 1) % path.length];
+          perimeter += Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        }
+        return perimeter;
+      }
+
+      function isPointInPolygon(point, polygon) {
+        let isInside = false;
+        const len = polygon.length;
+        if (len < 3) return false;
+        for (let i = 0, j = len - 1; i < len; j = i++) {
+          const pi = polygon[i];
+          const pj = polygon[j];
+          const intersect = ((pi.y > point.y) !== (pj.y > point.y)) &&
+            (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x);
+          if (intersect) isInside = !isInside;
+        }
+        return isInside;
+      }
+
+      // --- Main Setup Function ---
+      function setupCanvas() {
+        const container = canvas.parentElement;
+        const width = container.clientWidth;
+        const height = width * 0.75;
+        const dpr = window.devicePixelRatio || 1;
+        // Set display size (css pixels)
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        // Set actual size in memory (scaled to device pixel ratio)
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform before scaling
+        ctx.scale(dpr, dpr);
+        resetCaptcha();
+      }
+
+      // --- Captcha Generation Logic ---
+      function generateSolvableChallengingCaptcha() {
+        const width = canvas.width / (window.devicePixelRatio || 1);
+        const height = canvas.height / (window.devicePixelRatio || 1);
+        let bestPath = [];
+        let generatedDots = [];
+        let attempts = 0;
+
+        while (attempts < 50 && bestPath.length === 0) {
+          attempts++;
+
+          let allPlacedDots = [];
+          let greenDots = [];
+          for (let i = 0; i < config.greenDots; i++) {
+            let dot;
+            let validPos = false;
+            for (let k = 0; k < 100; k++) {
+              dot = { x: Math.random() * (width * 0.7) + (width * 0.15), y: Math.random() * (height * 0.7) + (height * 0.15) };
+              if (!allPlacedDots.some(d => Math.hypot(d.x - dot.x, d.y - dot.y) < config.minDistance * 1.5)) {
+                validPos = true; break;
+              }
+            }
+            if (validPos) allPlacedDots.push(dot);
+          }
+          if (allPlacedDots.length < config.greenDots) continue;
+          greenDots = allPlacedDots.map(d => ({ ...d, type: 'green', color: 'rgba(34, 197, 94, 1)' }));
+
+          if (greenDots.length < 3) continue;
+
+          let redDots = [];
+          for (let i = 0; i < config.redDots; i++) {
+            let dot;
+            let validPos = false;
+            for (let k = 0; k < 100; k++) {
+              dot = { x: Math.random() * (width - 4 * config.dotRadius) + 2 * config.dotRadius, y: Math.random() * (height - 4 * config.dotRadius) + 2 * config.dotRadius, };
+              if (!allPlacedDots.some(d => Math.hypot(d.x - dot.x, d.y - dot.y) < config.minDistance)) {
+                validPos = true; break;
+              }
+            }
+            if (validPos) {
+              allPlacedDots.push(dot);
+              redDots.push({ ...dot, type: 'red', color: 'rgba(239, 68, 68, 1)' });
+            }
+          }
+
+          let path = getConvexHull(greenDots);
+          let intruders = redDots.filter(r => isPointInPolygon(r, path));
+
+          intruders.forEach(intruder => {
+            let bestEdgeIndex = -1;
+            let minPerimeterIncrease = Infinity;
+            for (let i = 0; i < path.length; i++) {
+              const p1 = path[i];
+              const p2 = path[(i + 1) % path.length];
+              const originalDist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+              const newDist = Math.hypot(p1.x - intruder.x, p1.y - intruder.y) + Math.hypot(intruder.x - p2.x, intruder.y - p2.y);
+              const perimeterIncrease = newDist - originalDist;
+              if (perimeterIncrease < minPerimeterIncrease) {
+                minPerimeterIncrease = perimeterIncrease;
+                bestEdgeIndex = i;
+              }
+            }
+            if (bestEdgeIndex !== -1) path.splice(bestEdgeIndex + 1, 0, intruder);
+          });
+
+          const isStillValid = !redDots.some(r => isPointInPolygon(r, path) && !intruders.includes(r));
+          if (isStillValid) {
+            bestPath = path;
+            generatedDots = [...greenDots, ...redDots];
+          }
+        }
+
+        if (bestPath.length > 0) {
+          dots = generatedDots;
+          solutionPath = bestPath; // Store the solution
+          const perimeter = getPathPerimeter(bestPath);
+          inkTotal = perimeter * config.inkMargin;
+        } else {
+          console.error("Failed to generate a captcha. Retrying...");
+          generateSolvableChallengingCaptcha();
+        }
+      }
+
+
+      // --- Drawing Functions ---
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        dots.forEach(dot => {
+          ctx.beginPath();
+          ctx.arc(dot.x, dot.y, config.dotRadius, 0, Math.PI * 2);
+          ctx.fillStyle = dot.color;
+          ctx.fill();
+        });
+        if (userPath.length > 0) {
+          const start = userPath[0];
+          ctx.beginPath();
+          ctx.arc(start.x, start.y, config.startPointRadius, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+        if (userPath.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(userPath[0].x, userPath[0].y);
+          for (let i = 1; i < userPath.length; i++) ctx.lineTo(userPath[i].x, userPath[i].y);
+          ctx.strokeStyle = 'rgba(59, 130, 246, 0.8)';
+          ctx.lineWidth = 4;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+        }
+      }
+
+      // NEW: Function to draw the optimal solution path
+      function drawSolution() {
+        if (solutionPath.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(solutionPath[0].x, solutionPath[0].y);
+          for (let i = 1; i < solutionPath.length; i++) {
+            ctx.lineTo(solutionPath[i].x, solutionPath[i].y);
+          }
+          ctx.closePath();
+          ctx.strokeStyle = 'rgba(251, 191, 36, 0.9)'; // Amber color
+          ctx.lineWidth = 3;
+          ctx.setLineDash([5, 5]); // Dashed line style
+          ctx.stroke();
+          ctx.setLineDash([]); // Reset line dash for other drawings
+        }
+      }
+
+
+      function updateInkBar() {
+        const inkPercentage = Math.max(0, (1 - inkUsed / inkTotal) * 100);
+        inkBar.style.width = `${inkPercentage}%`;
+      }
+
+      // --- Event Handlers ---
+      function getMousePos(evt) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / (window.devicePixelRatio || 1) / rect.width;
+        const scaleY = canvas.height / (window.devicePixelRatio || 1) / rect.height;
+        const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+        const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+
+        return {
+          x: (clientX - rect.left) * scaleX,
+          y: (clientY - rect.top) * scaleY
+        };
+      }
+
+      function startDrawing(e) {
+        e.preventDefault();
+        if (userPath.length > 0 || verifyBtn.disabled) return; // Don't draw if already started or failed
+        isDrawing = true;
+        userPath.push(getMousePos(e));
+        draw();
+      }
+
+      function stopDrawing() {
+        if (!isDrawing) return;
+        isDrawing = false;
+        draw();
+      }
+
+      function drawPath(e) {
+        if (!isDrawing) return;
+        e.preventDefault();
+        const pos = getMousePos(e);
+        const lastPos = userPath[userPath.length - 1];
+        const distance = Math.hypot(pos.x - lastPos.x, pos.y - lastPos.y);
+
+        // --- NEW: Fail if user path touches any red dot ---
+        for (const dot of dots) {
+          if (dot.type === 'red') {
+            if (lineIntersectsCircle(lastPos, pos, dot, config.dotRadius)) {
+              userPath.push(pos);
+              inkUsed += distance;
+              updateInkBar();
+              draw();
+              alert('You touched a red dot! Try Again.');
+              verifyBtn.disabled = true;
+              stopDrawing();
+              drawSolution();
+              return;
+            }
+          }
+        }
+
+        if (inkUsed + distance >= inkTotal) {
+          const ratio = (inkTotal - inkUsed) / distance;
+          const finalPos = {
+            x: lastPos.x + (pos.x - lastPos.x) * ratio,
+            y: lastPos.y + (pos.y - lastPos.y) * ratio
+          };
+          userPath.push(finalPos);
+          inkUsed = inkTotal;
+          updateInkBar();
+          stopDrawing();
+
+          // --- NEW: Out of ink logic ---
+          alert("Out of ink! Try Again.");
+          verifyBtn.disabled = true;
+          drawSolution(); // Show the optimal path
+        } else {
+          userPath.push(pos);
+          inkUsed += distance;
+          updateInkBar();
+          draw();
+        }
+      }
+
+      // --- Logic Functions ---
+      function resetCaptcha() {
+        userPath = [];
+        solutionPath = [];
+        inkUsed = 0;
+        isDrawing = false;
+        verifyBtn.disabled = false; // Re-enable verify button
+        generateSolvableChallengingCaptcha();
+        updateInkBar();
+        draw();
+      }
+
+      function verifySolution() {
+        if (userPath.length < 3) {
+          alert('Draw a shape first!');
+          return;
+        }
+
+        const startPoint = userPath[0];
+        const endPoint = userPath[userPath.length - 1];
+        if (Math.hypot(startPoint.x - endPoint.x, startPoint.y - endPoint.y) > config.closingDistance) {
+          alert('You must close the shape!');
+          return;
+        }
+
+        let allGreenIn = true;
+        let anyRedIn = false;
+
+        dots.forEach(dot => {
+          const isInside = isPointInPolygon(dot, userPath);
+          if (dot.type === 'green' && !isInside) allGreenIn = false;
+          if (dot.type === 'red' && isInside) anyRedIn = true;
+        });
+
+        if (allGreenIn && !anyRedIn) {
+          alert('Success! You are human.');
+          verifyBtn.disabled = true; // Disable after success
+        } else {
+          let errorMsg = 'Incorrect. ';
+          if (!allGreenIn) errorMsg += 'A green dot was missed. ';
+          if (anyRedIn) errorMsg += 'A red dot was included.';
+          alert(errorMsg);
+        }
+      }
+
+      // --- Event Listeners ---
+      canvas.addEventListener('mousedown', startDrawing);
+      canvas.addEventListener('mouseup', stopDrawing);
+      canvas.addEventListener('mouseleave', stopDrawing);
+      canvas.addEventListener('mousemove', drawPath);
+      canvas.addEventListener('touchstart', startDrawing);
+      canvas.addEventListener('touchend', stopDrawing);
+      canvas.addEventListener('touchmove', drawPath);
+      verifyBtn.addEventListener('click', verifySolution);
+      resetBtn.addEventListener('click', setupCanvas);
+      window.addEventListener('resize', setupCanvas);
+
+      // --- Initial Load ---
+      setupCanvas();
+    });
   </script>
 </body>
+
 </html>
