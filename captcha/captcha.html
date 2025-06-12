@@ -441,7 +441,7 @@
         });
 
         if (allGreenIn && !anyRedIn) {
-          alert('Success! You are human.');
+          window.top.postMessage("success", '*');
           verifyBtn.disabled = true; // Disable after success
         } else {
           let errorMsg = 'Incorrect. ';
