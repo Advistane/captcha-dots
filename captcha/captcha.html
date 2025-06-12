@@ -387,9 +387,10 @@
               inkUsed += distance;
               updateInkBar();
               draw();
+              stopDrawing();
               alert('You touched a red dot! Try Again.');
               verifyBtn.disabled = true;
-              stopDrawing();
+              
               drawSolution();
               resetBtn.disabled = false; // Enable reset button on fail
               return;
