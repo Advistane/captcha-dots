@@ -8,12 +8,24 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
+    html, body {
+      height: 85vh;
+      margin: 0;
+      padding: 0;
+    }
     body {
       font-family: 'Inter', sans-serif;
       touch-action: none;
+      height: 85vh;
+      width: 100%;
       /* Prevents scrolling on touch devices when drawing */
     }
-
+    #main-captcha-container {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+    }
     canvas {
       cursor: crosshair;
       border-radius: 0.5rem;
@@ -23,11 +35,9 @@
       max-width: 100%;
       display: block;
     }
-
     .progress-bar {
       transition: width 0.2s ease-out;
     }
-
     button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -35,35 +45,32 @@
   </style>
 </head>
 
-<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+<body class="bg-gray-100 w-full h-full">
 
-  <div class="w-full max-w-xl p-4 md:p-8 bg-white rounded-xl shadow-lg">
-    <div class="text-center mb-4">
-      <p class="text-gray-600 mt-1">Draw a single <span class="font-semibold">closed shape</span> to enclose all <span
+  <div id="main-captcha-container" class="w-full h-full max-w-xl p-1 bg-white rounded-md shadow-sm mx-auto">
+    <div class="text-center mb-1">
+      <p class="text-gray-600 text-xs leading-tight mt-0 mb-1">Draw a single <span class="font-semibold">closed shape</span> to enclose all <span
           class="text-green-500 font-semibold">green</span> dots, avoiding all <span
           class="text-red-500 font-semibold">red</span> dots. End your line where you started.</p>
     </div>
 
-    <!-- Canvas for the captcha -->
-    <canvas id="captchaCanvas" class="bg-gray-50 border-2 border-gray-200 w-full"></canvas>
+    <canvas id="captchaCanvas" class="bg-gray-50 border border-gray-200 w-full flex-grow" style="display:block;max-width:100%;height:1px;"></canvas>
 
-    <!-- Ink Indicator -->
-    <div class="mt-4">
-      <label for="ink" class="text-sm font-medium text-gray-700">Ink Remaining:</label>
-      <div id="ink-container" class="w-full bg-gray-200 rounded-full h-4 mt-1 overflow-hidden">
-        <div id="inkBar" class="bg-blue-500 h-4 rounded-full progress-bar"></div>
+    <div class="mt-1">
+      <label for="ink" class="text-xs font-medium text-gray-700">Ink Remaining:</label>
+      <div id="ink-container" class="w-full bg-gray-200 rounded h-2 mt-0.5 overflow-hidden">
+        <div id="inkBar" class="bg-blue-500 h-2 rounded progress-bar"></div>
       </div>
     </div>
 
-    <!-- Controls and Messages -->
-    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
-      <div class="flex gap-2 mt-2">
+    <div class="flex flex-row items-center justify-between gap-1 mt-1">
+      <div class="flex gap-1 justify-between">
         <button id="verifyBtn"
-          class="px-6 py-2 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+          class="px-3 py-1 bg-green-600 text-white text-xs font-semibold rounded shadow hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
           Verify
         </button>
         <button id="resetBtn"
-          class="px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition duration-200">
+          class="px-3 py-1 bg-gray-600 text-white text-xs font-semibold rounded shadow hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
           New
         </button>
       </div>
@@ -87,6 +94,9 @@
       let inkUsed = 0;
       let inkTotal = 1500;
 
+      let newClickCounter = 0;
+
+      // --- Configuration ---
       const config = {
         dotRadius: 8,
         greenDots: 5,
@@ -97,10 +107,10 @@
         inkMargin: 1.35
       };
 
-      // --- NEW: Adjust inkMargin for mobile users ---
       function isMobile() {
         return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
       }
+
       if (isMobile()) {
         config.inkMargin = 1.7; // Give more ink on mobile
       }
@@ -180,17 +190,18 @@
       function setupCanvas() {
         const container = canvas.parentElement;
         const width = container.clientWidth;
-        const height = width * 0.75;
+        const containerHeight = container.clientHeight;
+        const reserved = 60;
+        const height = Math.max(40, containerHeight - reserved);
         const dpr = window.devicePixelRatio || 1;
-        // Set display size (css pixels)
         canvas.style.width = `${width}px`;
         canvas.style.height = `${height}px`;
-        // Set actual size in memory (scaled to device pixel ratio)
         canvas.width = Math.round(width * dpr);
         canvas.height = Math.round(height * dpr);
-        ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform before scaling
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.scale(dpr, dpr);
         resetCaptcha();
+        resetBtn.disabled = true; // Disable reset button on setup
       }
 
       // --- Captcha Generation Logic ---
@@ -267,7 +278,7 @@
 
         if (bestPath.length > 0) {
           dots = generatedDots;
-          solutionPath = bestPath; // Store the solution
+          solutionPath = bestPath;
           const perimeter = getPathPerimeter(bestPath);
           inkTotal = perimeter * config.inkMargin;
         } else {
@@ -286,6 +297,7 @@
           ctx.fillStyle = dot.color;
           ctx.fill();
         });
+
         if (userPath.length > 0) {
           const start = userPath[0];
           ctx.beginPath();
@@ -296,6 +308,7 @@
           ctx.lineWidth = 2;
           ctx.stroke();
         }
+
         if (userPath.length > 1) {
           ctx.beginPath();
           ctx.moveTo(userPath[0].x, userPath[0].y);
@@ -316,12 +329,13 @@
           for (let i = 1; i < solutionPath.length; i++) {
             ctx.lineTo(solutionPath[i].x, solutionPath[i].y);
           }
+
           ctx.closePath();
-          ctx.strokeStyle = 'rgba(251, 191, 36, 0.9)'; // Amber color
+          ctx.strokeStyle = 'rgba(251, 191, 36, 0.9)';
           ctx.lineWidth = 3;
-          ctx.setLineDash([5, 5]); // Dashed line style
+          ctx.setLineDash([5, 5]);
           ctx.stroke();
-          ctx.setLineDash([]); // Reset line dash for other drawings
+          ctx.setLineDash([]);
         }
       }
 
@@ -347,7 +361,7 @@
 
       function startDrawing(e) {
         e.preventDefault();
-        if (userPath.length > 0 || verifyBtn.disabled) return; // Don't draw if already started or failed
+        if (userPath.length > 0 || verifyBtn.disabled) return;
         isDrawing = true;
         userPath.push(getMousePos(e));
         draw();
@@ -366,7 +380,6 @@
         const lastPos = userPath[userPath.length - 1];
         const distance = Math.hypot(pos.x - lastPos.x, pos.y - lastPos.y);
 
-        // --- NEW: Fail if user path touches any red dot ---
         for (const dot of dots) {
           if (dot.type === 'red') {
             if (lineIntersectsCircle(lastPos, pos, dot, config.dotRadius)) {
@@ -378,6 +391,7 @@
               verifyBtn.disabled = true;
               stopDrawing();
               drawSolution();
+              resetBtn.disabled = false; // Enable reset button on fail
               return;
             }
           }
@@ -394,10 +408,10 @@
           updateInkBar();
           stopDrawing();
 
-          // --- NEW: Out of ink logic ---
           alert("Out of ink! Try Again.");
           verifyBtn.disabled = true;
           drawSolution(); // Show the optimal path
+          resetBtn.disabled = false; // Enable reset button on fail
         } else {
           userPath.push(pos);
           inkUsed += distance;
@@ -416,6 +430,7 @@
         generateSolvableChallengingCaptcha();
         updateInkBar();
         draw();
+        resetBtn.disabled = true; // Disable reset button after reset
       }
 
       function verifySolution() {
@@ -442,7 +457,7 @@
 
         if (allGreenIn && !anyRedIn) {
           window.top.postMessage("success", '*');
-          verifyBtn.disabled = true; // Disable after success
+          verifyBtn.disabled = true;
         } else {
           let errorMsg = 'Incorrect. ';
           if (!allGreenIn) errorMsg += 'A green dot was missed. ';
