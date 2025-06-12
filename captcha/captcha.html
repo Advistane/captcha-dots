@@ -341,7 +341,7 @@
 
 
       function updateInkBar() {
-        const inkPercentage = Math.max(0, (1 - inkUsed / inkTotal) * 100);
+        const inkPercentage = Math.max(0, Math.min(100, (1 - inkUsed / inkTotal) * 100));
         inkBar.style.width = `${inkPercentage}%`;
       }
 
